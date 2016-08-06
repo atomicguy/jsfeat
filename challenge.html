@@ -12,16 +12,7 @@
         <link rel="stylesheet" href="css/bootstrap.css">
         <link rel="stylesheet" href="css/jsfeat.css">
 
-        <script type="text/javascript">
-          var _gaq = _gaq || [];
-          _gaq.push(['_setAccount', 'UA-36419199-1']);
-          _gaq.push(['_trackPageview']);
-          (function() {
-            var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
-            ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
-            var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
-          })();
-        </script>
+
     </head>
     <body>
             <video id="webcam" width="640" height="480" style="display:none;"></video>
@@ -141,6 +132,7 @@
                 gui.add(options, 'edges_density', 0.01, 1.).step(0.005);
 
                 stat.add("haar detector");
+                stat.add("median");
             }
 
             function tick() {
@@ -152,6 +144,8 @@
 
                     work_ctx.drawImage(video, 0, 0, work_canvas.width, work_canvas.height);
                     var imageData = work_ctx.getImageData(0, 0, work_canvas.width, work_canvas.height);
+
+                    var median = jsfeat.math.median(imageData, 0, imageData.length-1);
 
                     stat.start("haar detector");
 
