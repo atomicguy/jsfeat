@@ -183,7 +183,7 @@
                 n = Math.min(n, on);
                 var r;
                 for(var i = 0; i < n; ++i) {
-                    // r = rects[i];
+                    r = rects[i];
                     // ctx.strokeRect((r.x*sc)|0,(r.y*sc)|0,(r.width*sc)|0,(r.height*sc)|0);
                     ctx.drawImage(video, (r.x*sc)|0, (r.y*sc)|0, (r.width*sc)|0, (r.height*sc)|0, (r.x*sc)|0, (r.y*sc)|0, (r.width*sc)|0, (r.height*sc)|0);
                 }
