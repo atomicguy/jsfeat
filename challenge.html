@@ -139,7 +139,7 @@
                 stat.new_frame();
                 if (video.readyState === video.HAVE_ENOUGH_DATA) {
 
-                    // ctx.drawImage(video, 0, 0, canvasWidth, canvasHeight);
+                    ctx.drawImage(video, 0, 0, canvasWidth, canvasHeight);
 
                     work_ctx.drawImage(video, 0, 0, work_canvas.width, work_canvas.height);
                     var imageData = work_ctx.getImageData(0, 0, work_canvas.width, work_canvas.height);
