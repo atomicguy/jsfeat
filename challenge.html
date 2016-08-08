@@ -4,13 +4,14 @@
     <head>
         <meta charset="utf-8">
         <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
-        <meta name="description" content="A JavaScript Computer Vision Library">
-        <meta name="author" content="Eugene Zatepyakin">
-        <title>JSFeat - JavaScript Computer Vision Library.</title>
+        <meta name="description" content="Face Isolation">
+        <meta name="author" content="Adam Schuster">
+        <title>Face Masque</title>
 
         <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Sans:regular,bold|Inconsolata|PT+Sans:400,700">
         <link rel="stylesheet" href="css/bootstrap.css">
         <link rel="stylesheet" href="css/jsfeat.css">
+        <script type="text/javascript" src="caman.full.min.js"></script>
 
 
     </head>
@@ -190,7 +191,7 @@
                     // work_ctx.ellipse( xC, yC, w0/2, y0/2, 0, 0, 2*Math.PI);
                     face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,fs,fs);
                     var img_face = face_ctx.getImageData(0,0,fs,fs);
-                    find_skin(img_face);
+                    find_skin_rgb(img_face);
                     // ctx.drawImage(video, x0, y0, w0, h0, 0,0,128,128);
                     ctx.putImageData(img_face, 0, 0);
                 }
@@ -202,9 +203,13 @@
 
             function find_skin(img_face){
                 var img_rgba = img_face.data;
+
                 var img_len  = img_rgba.length;
                 var minH = options.center_hue - options.hue_spread;
                 var maxH = options.center_hue + options.hue_spread;
+
+                // clone data into a shadow array
+                var shadowdata = img_rgba.slice(0);
 
                 for (var i = 0; i < img_len; i += 4){
                     // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
@@ -229,7 +234,14 @@
                     img_rgba[i+1] = intH;
                     img_rgba[i+2] = intH;
                     img_rgba[i+3] = intH;
+
+                    shadowdata[i]   = compH;
+                    shadowdata[i+1] = compH;
+                    shadowdata[i+2] = compH;
                 }
+
+
+                // console.log(median(shadowdata));
 
                 for (var i = 0; i < img_len; i++) {
                     img_rgba[i] = img_rgba[i] < minH ? 0 : img_rgba[i];
@@ -252,6 +264,68 @@
                         data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
                     }
 
+            }
+
+            // as shown by Peer et al 2003
+            // skin tone clusters in a region if the following are all true:
+            // R > 95
+            // G > 40
+            // B > 20
+            // max{R,G,B} - min{R,G,B} > 15
+            // |R-G| > 15
+            // R > G
+            // R > B
+            //
+            function find_skin_rgb(img_face){
+                var img_rgba = img_face.data;
+                var img_len  = img_rgba.length;
+
+                // clone data into a shadow array
+                var shadowdata = img_rgba.slice(0);
+
+                for (var i = 0; i < img_len; i += 4){
+                    // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
+                    var r = img_rgba[i];
+                    var g = img_rgba[i+1];
+                    var b = img_rgba[i+2];
+
+                    var skin = false;
+
+                    var maxRGB = Math.max(r,g,b);
+                    var minRGB = Math.min(r,g,b);
+
+                    if ((r > 95) && (g > 40) && (b > 20) && (maxRGB - minRGB > 15) && (Math.abs(r - g) > 15) && (r > g) && (r > b)) {
+                        skin = true;
+                    }
+
+                    if (skin == true) {
+                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = 255;
+                    }
+                    else {
+                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = 0;
+                    }
+
+                }
+
+                jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
+
+                // Load adjusted data back onto a Canvas
+                var data_u32 = new Uint32Array(img_rgba.buffer);
+                    var alpha = (0xff << 24);
+                    var i = img_u8.cols*img_u8.rows, pix = 0;
+                    while(--i >= 0) {
+                        pix = img_u8.data[i];
+                        data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                    }
+            }
+
+            function median(values) {
+                values.sort( function(a,b) {return a - b;} );
+                var half = Math.floor(values.length/2);
+                if(values.length % 2)
+                    return values[half];
+                else
+                    return (values[half-1] + values[half]) / 2.0;
             }
 
             $(window).unload(function() {

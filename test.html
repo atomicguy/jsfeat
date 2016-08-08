@@ -1,0 +1,35 @@
+<!doctype html>
+
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <meta name="description" content="Face Isolation Scripting">
+        <meta name="author" content="Adam Schuster">
+        <title>Face Masque</title>
+<!--
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Sans:regular,bold|Inconsolata|PT+Sans:400,700">
+        <link rel="stylesheet" href="css/bootstrap.css">
+        <link rel="stylesheet" href="css/jsfeat.css"> -->
+        <script type="text/javascript" src="./js/caman.full.min.js"></script>
+
+
+    </head>
+    <body>
+        <img id="still" src="images/face.jpg" alt="still image" />
+        <!-- <canvas id="workspace" height="256" width="256"></canvas> -->
+        <!-- <div style=" width:640px;height:480px;margin: 10px auto;">
+            <canvas id="canvas" width="640" height="480"></canvas>
+            <div id="no_rtc" class="alert alert-error" style="display:none;"></div>
+            <div id="log" class="alert alert-info"></div>
+        </div> -->
+
+        <script type="text/javascript">
+            Caman("#still", function () {
+                this.stackBlur(21);
+                this.render();
+                });
+        </script>
+
+    </body>
+</html>
