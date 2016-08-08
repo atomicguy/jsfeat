@@ -92,8 +92,12 @@
             var max_work_size = 160;
 
             var demo_opt = function(){
-                this.equalize_histogram = true;
-                this.center_hue = 20;
+                this.center_hue = 0;
+                this.hue_spread = 17;
+                this.kernel = 3;
+                this.sigma = 1;
+                this.low_threshold = 20;
+                this.high_threshold = 50;
             }
 
             function demo_app(videoWidth, videoHeight) {
@@ -116,7 +120,7 @@
                 work_ctx = work_canvas.getContext('2d');
 
                 face_canvas = document.createElement('canvas');
-                fs = 128;
+                fs = 256;
                 face_canvas.width = fs;
                 face_canvas.height = fs;
                 face_ctx = face_canvas.getContext('2d');
@@ -129,8 +133,12 @@
                 options = new demo_opt();
                 gui = new dat.GUI();
 
-                gui.add(options, 'equalize_histogram');
                 gui.add(options, 'center_hue', 0, 255).step(1);
+                gui.add(options, 'hue_spread', 0, 255).step(1);
+                gui.add(options, 'kernel', 1, 11).step(1);
+                gui.add(options, 'sigma', 0, 10).step(0.5);
+                gui.add(options, 'low_threshold', 1, 127).step(1);
+                gui.add(options, 'high_threshold', 1, 127).step(1);
 
                 stat.add("haar detector");
             }
@@ -140,8 +148,6 @@
                 stat.new_frame();
                 if (video.readyState === video.HAVE_ENOUGH_DATA) {
 
-                    // ctx.drawImage(video, 0, 0, canvasWidth, canvasHeight);
-
                     work_ctx.drawImage(video, 0, 0, work_canvas.width, work_canvas.height);
                     var imageData = work_ctx.getImageData(0, 0, work_canvas.width, work_canvas.height);
 
@@ -149,14 +155,11 @@
 
                     jsfeat.imgproc.grayscale(imageData.data, work_canvas.width, work_canvas.height, img_u8);
 
-                    // possible options
-                    if(options.equalize_histogram) {
-                        jsfeat.imgproc.equalize_histogram(img_u8, img_u8);
-                    }
+                    jsfeat.imgproc.equalize_histogram(img_u8, img_u8);
 
                     jsfeat.imgproc.compute_integral_image(img_u8, ii_sum, ii_sqsum, classifier.tilted ? ii_tilted : null);
 
-                    var rects = jsfeat.haar.detect_multi_scale(ii_sum, ii_sqsum, ii_tilted, null, img_u8.cols, img_u8.rows, classifier, options.scale_factor, options.min_scale);
+                    var rects = jsfeat.haar.detect_multi_scale(ii_sum, ii_sqsum, ii_tilted, null, img_u8.cols, img_u8.rows, classifier, 1.2, 1);
                     rects = jsfeat.haar.group_rectangles(rects, 1);
 
                     stat.stop("haar detector");
@@ -200,8 +203,8 @@
             function find_skin(img_face){
                 var img_rgba = img_face.data;
                 var img_len  = img_rgba.length;
-                var minH = options.center_hue - 10;
-                var maxH = options.center_hue + 10;
+                var minH = options.center_hue - options.hue_spread;
+                var maxH = options.center_hue + options.hue_spread;
 
                 for (var i = 0; i < img_len; i += 4){
                     // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
@@ -222,33 +225,32 @@
 
                     var intH = parseInt(255*compH/360);
 
-                    if (intH << minH | intH >> maxH) {
-                        intH = 1;
-                    }
-                    else{
-                        intH = 0;
-                    }
-
                     img_rgba[i]   = intH;
                     img_rgba[i+1] = intH;
                     img_rgba[i+2] = intH;
                     img_rgba[i+3] = intH;
                 }
 
-                // var edge_mat = new jsfeat.matrix_t(fs, fs, jsfeat.U8_t | jsfeat.C1_t);
+                for (var i = 0; i < img_len; i++) {
+                    img_rgba[i] = img_rgba[i] < minH ? 0 : img_rgba[i];
+                    img_rgba[i] = img_rgba[i] > maxH ? 0 : img_rgba[i];
+                    img_rgba[i] = img_rgba[i] > 0 ? 255 : img_rgba[i];
+                }
 
-                // jsfeat.imgproc.scharr_derivatives(img_rgba, edge_mat);
-                //
-                // var data_u32 = new Uint32Array(img_rgba);
-                // var alpha = (0xff << 24);
-                // var i = fs*fs, pix=0, gx=0, gy=0;
-                // while(--i >= 0) {
-                //     gx = Math.abs(edge_mat[i<<1]>>2)&0xff;
-                //     gy = Math.abs(edge_mat[(i<<1)+1]>>2)&0xff;
-                //     pix = ((gx + gy)>>2)&0xff;
-                //     data_u32[i] = (pix << 24 ) | (gx << 16) |  (0 << 8) | gy;
-                // }
+                jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
+                // jsfeat.imgproc.gaussian_blur(img_u8, img_u8, options.kernel, options.sigma);
+                // jsfeat.imgproc.canny(img_u8, img_u8, options.low_threshold|0, options.high_threshold|0);
+                jsfeat.imgproc.box_blur_gray(img_u8, img_u8, 3, options = 0);
 
+                // Load adjusted data back onto a Canvas
+
+                var data_u32 = new Uint32Array(img_rgba.buffer);
+                    var alpha = (0xff << 24);
+                    var i = img_u8.cols*img_u8.rows, pix = 0;
+                    while(--i >= 0) {
+                        pix = img_u8.data[i];
+                        data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                    }
 
             }
 
