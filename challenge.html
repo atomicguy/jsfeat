@@ -87,18 +87,13 @@
             var stat = new profiler();
 
             var gui,options,ctx,canvasWidth,canvasHeight;
-            var img_u8,work_canvas,work_ctx,face_canvas,face_ctx,fs,ii_sum,ii_sqsum,ii_tilted,edg,ii_canny;
+            var img_u8,work_canvas,work_ctx,face_canvas,face_ctx,fs,ii_sum,ii_sqsum,ii_tilted,edg,ii_canny,gray_img;
             var classifier = jsfeat.haar.frontalface;
 
             var max_work_size = 160;
 
             var demo_opt = function(){
-                this.center_hue = 0;
-                this.hue_spread = 17;
-                this.kernel = 3;
-                this.sigma = 1;
-                this.low_threshold = 20;
-                this.high_threshold = 50;
+                this.radius = 3;
             }
 
             function demo_app(videoWidth, videoHeight) {
@@ -125,6 +120,7 @@
                 face_canvas.width = fs;
                 face_canvas.height = fs;
                 face_ctx = face_canvas.getContext('2d');
+                gray_img = new jsfeat.matrix_t(fs, fs, jsfeat.U8_t | jsfeat.C1_t);
 
                 ii_sum = new Int32Array((w+1)*(h+1));
                 ii_sqsum = new Int32Array((w+1)*(h+1));
@@ -134,12 +130,7 @@
                 options = new demo_opt();
                 gui = new dat.GUI();
 
-                gui.add(options, 'center_hue', 0, 255).step(1);
-                gui.add(options, 'hue_spread', 0, 255).step(1);
-                gui.add(options, 'kernel', 1, 11).step(1);
-                gui.add(options, 'sigma', 0, 10).step(0.5);
-                gui.add(options, 'low_threshold', 1, 127).step(1);
-                gui.add(options, 'high_threshold', 1, 127).step(1);
+                gui.add(options, 'radius', 1, 31).step(1);
 
                 stat.add("haar detector");
             }
@@ -154,6 +145,7 @@
 
                     stat.start("haar detector");
 
+                    // Prep image for Face Detection
                     jsfeat.imgproc.grayscale(imageData.data, work_canvas.width, work_canvas.height, img_u8);
 
                     jsfeat.imgproc.equalize_histogram(img_u8, img_u8);
@@ -166,13 +158,13 @@
                     stat.stop("haar detector");
 
                     // draw only most confident one
-                    draw_faces(ctx, rects, canvasWidth/img_u8.cols, 1);
+                    crop_face(ctx, face_ctx, rects, canvasWidth/img_u8.cols, 1);
 
                     $('#log').html(stat.log());
                 }
             }
 
-            function draw_faces(ctx, rects, sc, max) {
+            function crop_face(ctx, face_ctx, rects, sc, max) {
                 var on = rects.length;
                 if(on && max) {
                     jsfeat.math.qsort(rects, 0, on-1, function(a,b){return (b.confidence<a.confidence);})
@@ -186,87 +178,33 @@
                     var y0 = r.y * sc;
                     var w0 = r.width * sc;
                     var h0 = r.height * sc;
-                    // var xC = x0 + x0/2;
-                    // var yC = y0 + y0/2;
-                    // work_ctx.ellipse( xC, yC, w0/2, y0/2, 0, 0, 2*Math.PI);
-                    face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,fs,fs);
-                    var img_face = face_ctx.getImageData(0,0,fs,fs);
-                    find_skin_rgb(img_face);
-                    // ctx.drawImage(video, x0, y0, w0, h0, 0,0,128,128);
-                    ctx.putImageData(img_face, 0, 0);
+                    // scale width to keep constant height
+                    var w1 = parseInt(fs*w0/h0);
+
+                    // load cropped face info from working context
+                    var face_data = work_ctx.getImageData(x0,y0,w0,h0);
+
+                    face_ctx.clearRect(0,0,fs,fs);
+
+                    // Rough clip face data with an Ellipse
+                    var xC = parseInt(fs/2);
+                    var yC = parseInt(fs/2);
+                    face_ctx.ellipse( xC, yC, parseInt(w0*0.8), parseInt(h0*0.9), 0, 0, 2*Math.PI);
+                    face_ctx.clip();
+                    face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,w1,fs);
+
+                    // load face data from Face Canvas
+                    face_data = face_ctx.getImageData(0,0,w1,fs);
+
+                    // mask to skin
+                    find_skin_rgb(face_data);
+
+                    ctx.putImageData(face_data, 0, 0);
                 }
             }
 
-            // Skin tone hue falls along the 20% line, since skin's color
-            // primarily comes from the blood below it.
-            // Therefore, shifting the image into just the hue space for analysis
 
-            function find_skin(img_face){
-                var img_rgba = img_face.data;
-
-                var img_len  = img_rgba.length;
-                var minH = options.center_hue - options.hue_spread;
-                var maxH = options.center_hue + options.hue_spread;
-
-                // clone data into a shadow array
-                var shadowdata = img_rgba.slice(0);
-
-                for (var i = 0; i < img_len; i += 4){
-                    // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
-                    var r = img_rgba[i];
-                    var g = img_rgba[i+1];
-                    var b = img_rgba[i+2];
-
-                    r = r/255;
-                    g = g/255;
-                    b = b/255;
-
-                    var minRGB = Math.min(r,Math.min(g,b));
-                    var maxRGB = Math.max(r,Math.max(g,b));
-
-                    var d = (r==minRGB) ? g-b : ((b=minRGB) ? r-g : b-r);
-                    var h = (r==minRGB) ? 3 : ((b==minRGB) ? 1 : 5);
-                    var compH = 60*(h - d/(maxRGB - minRGB));
-
-                    var intH = parseInt(255*compH/360);
-
-                    img_rgba[i]   = intH;
-                    img_rgba[i+1] = intH;
-                    img_rgba[i+2] = intH;
-                    img_rgba[i+3] = intH;
-
-                    shadowdata[i]   = compH;
-                    shadowdata[i+1] = compH;
-                    shadowdata[i+2] = compH;
-                }
-
-
-                // console.log(median(shadowdata));
-
-                for (var i = 0; i < img_len; i++) {
-                    img_rgba[i] = img_rgba[i] < minH ? 0 : img_rgba[i];
-                    img_rgba[i] = img_rgba[i] > maxH ? 0 : img_rgba[i];
-                    img_rgba[i] = img_rgba[i] > 0 ? 255 : img_rgba[i];
-                }
-
-                jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
-                // jsfeat.imgproc.gaussian_blur(img_u8, img_u8, options.kernel, options.sigma);
-                // jsfeat.imgproc.canny(img_u8, img_u8, options.low_threshold|0, options.high_threshold|0);
-                jsfeat.imgproc.box_blur_gray(img_u8, img_u8, 3, options = 0);
-
-                // Load adjusted data back onto a Canvas
-
-                var data_u32 = new Uint32Array(img_rgba.buffer);
-                    var alpha = (0xff << 24);
-                    var i = img_u8.cols*img_u8.rows, pix = 0;
-                    while(--i >= 0) {
-                        pix = img_u8.data[i];
-                        data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
-                    }
-
-            }
-
-            // as shown by Peer et al 2003
+            // As shown by Peer et al 2003
             // skin tone clusters in a region if the following are all true:
             // R > 95
             // G > 40
@@ -276,18 +214,18 @@
             // R > G
             // R > B
             //
-            function find_skin_rgb(img_face){
-                var img_rgba = img_face.data;
+            function find_skin_rgb(face_data){
+                var img_rgba = face_data.data;
                 var img_len  = img_rgba.length;
 
-                // clone data into a shadow array
-                var shadowdata = img_rgba.slice(0);
+                // clone data into an array for the mask
+                var masque = img_rgba.slice(0);
 
                 for (var i = 0; i < img_len; i += 4){
                     // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
-                    var r = img_rgba[i];
-                    var g = img_rgba[i+1];
-                    var b = img_rgba[i+2];
+                    var r = masque[i];
+                    var g = masque[i+1];
+                    var b = masque[i+2];
 
                     var skin = false;
 
@@ -299,24 +237,46 @@
                     }
 
                     if (skin == true) {
-                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = 255;
+                        masque[i] = masque[i+1] = masque[i+2] = masque[i+3] = 255;
                     }
                     else {
-                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = 0;
+                        masque[i] = masque[i+1] = masque[i+2] = masque[i+3] = 0;
                     }
 
                 }
 
-                jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
+                jsfeat.imgproc.grayscale(masque, fs, fs, img_u8);
+                jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, null);
 
-                // Load adjusted data back onto a Canvas
-                var data_u32 = new Uint32Array(img_rgba.buffer);
-                    var alpha = (0xff << 24);
-                    var i = img_u8.cols*img_u8.rows, pix = 0;
-                    while(--i >= 0) {
-                        pix = img_u8.data[i];
-                        data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
-                    }
+                // var data_u32 = new Uint32Array(face_data.data.buffer);
+                // var alpha = (0xff << 24);
+                // var i = gray_img.cols*gray_img.rows, pix = 0;
+                // while(--i >= 0) {
+                //     pix = img_rgba[i];
+                //     data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                // }
+
+                // jsfeat.imgproc.gaussian_blur(img_u8, img_u8, options.kernel, options.sigma);
+                // jsfeat.imgproc.canny(img_u8, img_u8, options.low_threshold|0, options.high_threshold|0);
+
+                // Generates glowing mask...not quite what I want but cool
+                for (var i = 0; i < img_len; i += 4){
+                    img_rgba[i+4] = masque[i];
+                }
+
+                // // Load adjusted data back onto a Canvas
+                // var data_u32 = new Uint32Array(masque.buffer);
+                //     var alpha = (0xff << 24);
+                //     var i = img_u8.cols*img_u8.rows, pix = 0;
+                //     while(--i >= 0) {
+                //         pix = img_u8[i];
+                //         data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                //     }
+
+                // // Use CamanJS filter
+                // Caman("#canvas", function() {
+                //     this.colorize(242, 128, 51, 50).render();
+                // });
             }
 
             function median(values) {
