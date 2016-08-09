@@ -1,6 +1,6 @@
 {
   "name": "FaceOff",
   "tagline": "Face isolation with JSFeat library",
-  "body": "# Isolate the Face #\r\n\r\n[demo](./challenge.html)",
+  "body": "# Isolate a Face #\r\n![Demo Image](https://atomicguy.github.io/masque/images/demo.jpg)\r\n[Demo](./quad.html)\r\n---\r\nUsage:\r\n* Works best in Firefox or Chrome (https only)\r\n* Grant permission to access your camera\r\n* Adjust the `min_scale` and `scale_factor` as needed to stabilize your face\r\n* Try turning on `use_ellipse` [Firefox 48 known to support this feature]\r\n* Adjust the `blur` of the mask\r\n\r\n\r\n",
   "note": "Don't delete this file! It's used internally to help with page regeneration."
 }
