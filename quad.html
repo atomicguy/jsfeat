@@ -17,18 +17,23 @@
     </head>
     <body>
             <video id="webcam" width="640" height="480" style="display:none;"></video>
-            <div style=" width:640px;height:480px;margin: 10px auto;">
+
+            <div style=" width:640px;height:480px;margin: 10px auto; position: absolute; top: 10px; left: 10px;">
                 <canvas id="canvas" width="640" height="480"></canvas>
                 <div id="no_rtc" class="alert alert-error" style="display:none;"></div>
             </div>
-            <div style=" width:256px; height:256px; margin 10px auto; float:left;">
-                <canvas id="canvas2" width="256" height="256"></canvas>
-            </div>
-            <div style=" width:256px; height:256px; margin 10px auto; float:left;">
-                <canvas id="canvas3" width="256" height="256"></canvas>
-            </div>
-            <div style=" width:256px; height:256px; margin 10px auto; float:left;">
-                <canvas id="canvas4" width="256" height="256"></canvas>
+            <div id="sampleBoxen" style="width: 100%; position: absolute; top: 490px; left: 10px;">
+                <div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                    <canvas id="canvasWork" width="256" height="256"></canvas>
+                </div>
+                <div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                    <canvas id="canvasFace" width="256" height="256"></canvas>
+                </div>
+                <div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                    <canvas id="canvasMasque" width="256" height="256"></canvas>
+                </div><div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                    <canvas id="canvasComp" width="256" height="256"></canvas>
+                </div>
             </div>
 
         <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.8.2/jquery.min.js"></script>
@@ -95,13 +100,18 @@
             var stat = new profiler();
 
             var gui,options,ctx,canvasWidth,canvasHeight;
-            var img_u8,work_canvas,work_ctx,face_canvas,face_ctx,mask_canvas,mask_ctx,fs,ii_sum,ii_sqsum,ii_tilted,edg,ii_canny,gray_img;
+            var img_u8,tmp_u8,work_canvas,work_ctx,face_canvas,face_ctx,mask_canvas,mask_ctx,composite_canvas,cc_ctx,fs,ii_sum,ii_sqsum,ii_tilted,ii_canny,gray_img;
             var classifier = jsfeat.haar.frontalface;
 
-            var max_work_size = 160;
+            var max_work_size = 256;
 
             var demo_opt = function(){
-                this.radius = 16;
+                this.min_scale = 3;
+                this.scale_factor = 1.6;
+                this.use_ellipse = false;
+                this.ellipse_r1 = 0.8;
+                this.ellipse_r2 = 0.9;
+                this.blur = 16;
             }
 
             function demo_app(videoWidth, videoHeight) {
@@ -115,19 +125,28 @@
                 var h = (videoHeight*scale)|0;
 
                 img_u8 = new jsfeat.matrix_t(w, h, jsfeat.U8_t | jsfeat.C1_t);
-                edg = new jsfeat.matrix_t(w, h, jsfeat.U8_t | jsfeat.C1_t);
+                tmp_u8 = new jsfeat.matrix_t(fs, fs, jsfeat.U8_t | jsfeat.C1_t);
 
-                work_canvas = document.getElementById('canvas2')
+                work_canvas = document.getElementById('canvasWork')
                 work_canvas.width = w;
                 work_canvas.height = h;
                 work_ctx = work_canvas.getContext('2d');
 
-                face_canvas = document.getElementById('canvas3')
+                face_canvas = document.getElementById('canvasFace')
                 fs = 256;
+                face_canvas.width = fs;
+                face_canvas.height= fs;
                 face_ctx = face_canvas.getContext('2d');
 
-                mask_canvas = document.getElementById('canvas4')
+                mask_canvas = document.getElementById('canvasMasque')
+                mask_canvas.width = fs;
+                mask_canvas.height= fs;
                 mask_ctx = mask_canvas.getContext('2d');
+
+                composite_canvas = document.getElementById('canvasComp');
+                composite_canvas.width = fs;
+                composite_canvas.height = fs;
+                cc_ctx = composite_canvas.getContext('2d');
 
                 ii_sum = new Int32Array((w+1)*(h+1));
                 ii_sqsum = new Int32Array((w+1)*(h+1));
@@ -137,9 +156,11 @@
                 options = new demo_opt();
                 gui = new dat.GUI();
 
-                gui.add(options, 'radius', 1, 31).step(1);
+                gui.add(options, 'min_scale', 1, 4).step(0.1);
+                gui.add(options, 'scale_factor', 1.1, 2).step(0.025);
+                gui.add(options, 'use_ellipse');
+                gui.add(options, 'blur', 1, 31).step(1);
 
-                stat.add("haar detector");
             }
 
             function tick() {
@@ -150,28 +171,22 @@
                     work_ctx.drawImage(video, 0, 0, work_canvas.width, work_canvas.height);
                     var imageData = work_ctx.getImageData(0, 0, work_canvas.width, work_canvas.height);
 
-                    stat.start("haar detector");
-
                     // Prep image for Face Detection
                     jsfeat.imgproc.grayscale(imageData.data, work_canvas.width, work_canvas.height, img_u8);
-
                     jsfeat.imgproc.equalize_histogram(img_u8, img_u8);
-
                     jsfeat.imgproc.compute_integral_image(img_u8, ii_sum, ii_sqsum, classifier.tilted ? ii_tilted : null);
 
-                    var rects = jsfeat.haar.detect_multi_scale(ii_sum, ii_sqsum, ii_tilted, null, img_u8.cols, img_u8.rows, classifier, 1.2, 1);
+                    // Find Face Region
+                    var rects = jsfeat.haar.detect_multi_scale(ii_sum, ii_sqsum, ii_tilted, null, img_u8.cols, img_u8.rows, classifier, options.scale_factor, options.min_scale);
                     rects = jsfeat.haar.group_rectangles(rects, 1);
 
-                    stat.stop("haar detector");
+                    // Send the most confident Face Rect onward
+                    crop_face(ctx, rects, canvasWidth/img_u8.cols, 1);
 
-                    // draw only most confident one
-                    crop_face(ctx, face_ctx, rects, canvasWidth/img_u8.cols, 1);
-
-                    $('#log').html(stat.log());
                 }
             }
 
-            function crop_face(ctx, face_ctx, rects, sc, max) {
+            function crop_face(ctx, rects, sc, max) {
                 var on = rects.length;
                 if(on && max) {
                     jsfeat.math.qsort(rects, 0, on-1, function(a,b){return (b.confidence<a.confidence);})
@@ -188,30 +203,37 @@
                     // scale width to keep constant height
                     var w1 = parseInt(fs*w0/h0);
 
-                    // load cropped face info from working context
-                    var mask_data = work_ctx.getImageData(x0,y0,w0,h0);
+                    // load cropped face from working context
+                    var work_data = work_ctx.getImageData(x0,y0,w0,h0);
 
-                    // face_ctx.clearRect(0,0,fs,fs);
-
-                    // Rough clip face data with an Ellipse
-                    var xC = parseInt(fs/2);
-                    var yC = parseInt(fs/2);
-                    face_ctx.ellipse( xC, yC, parseInt(w0*0.8), parseInt(h0*0.9), 0, 0, 2*Math.PI);
-                    face_ctx.shadowColor = "black";
-                    face_ctx.shadowBlur = 10;
-                    face_ctx.clip();
+                    face_ctx.clearRect(0,0,fs,fs);
+                    if(options.use_ellipse) {
+                        // If selected, use ellipse as mask
+                        // find center x,y point
+                        var xC = parseInt(fs/2);
+                        var yC = parseInt(fs/2);
+                        // use the height and width of cropped face to calculate
+                        // the radii of the ellipse
+                        var r1 = parseInt(w0*options.ellipse_r1);
+                        var r2 = parseInt(h0*options.ellipse_r2);
+                        face_ctx.ellipse( xC, yC, r1, r2, 0, 0, 2*Math.PI);
+                        face_ctx.clip();
+                    }
                     face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,w1,fs);
 
                     // load face data from Face Canvas
-                    mask_data = face_ctx.getImageData(0,0,fs,fs);
+                    var mask_data = face_ctx.getImageData(0,0,fs,fs);
                     mask_ctx.putImageData(mask_data, 0, 0);
+                    cc_ctx.putImageData(mask_data, 0, 0);
 
                     var face_data = face_ctx.getImageData(0,0,fs,fs);
 
                     // mask to skin
-                    find_skin_rgb(mask_data);
+                    find_skin_rgb(mask_data, face_data);
 
                     ctx.clearRect(0,0,fs,fs);
+
+                    ctx.drawImage(composite_canvas, 0, 0);
                     ctx.drawImage(mask_canvas, 0, 0);
                     ctx.drawImage(face_canvas, 0, 0);
                 }
@@ -228,15 +250,15 @@
             // R > G
             // R > B
             //
-            function find_skin_rgb(mask_data){
-                var img_rgba = mask_data.data;
-                var img_len  = img_rgba.length;
+            function find_skin_rgb(mask_data, face_data){
+                var mask_raw = mask_data.data;
+                var mask_raw_len  = mask_raw.length;
 
-                for (var i = 0; i < img_len; i += 4){
-                    // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
-                    var r = img_rgba[i];
-                    var g = img_rgba[i+1];
-                    var b = img_rgba[i+2];
+                for (var i = 0; i < mask_raw_len; i += 4){
+                    // var rgba = [mask_raw[i], mask_raw[i+1], mask_raw[i+2]];
+                    var r = mask_raw[i];
+                    var g = mask_raw[i+1];
+                    var b = mask_raw[i+2];
 
                     var skin = false;
 
@@ -248,42 +270,58 @@
                     }
 
                     if (skin == true) {
-                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = img_rgba[i+3] = 255;
+                        mask_raw[i] = mask_raw[i+1] = mask_raw[i+2] = mask_raw[i+3] = 255;
                     }
                     else {
-                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = img_rgba[i+3] = 0;
+                        mask_raw[i] = mask_raw[i+1] = mask_raw[i+2] = mask_raw[i+3] = 0;
                     }
-
                 }
 
-                jsfeat.imgproc.grayscale(img_rgba, fs,fs, img_u8, "RGBA");
-                jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, 0);
+                jsfeat.imgproc.grayscale(mask_raw, fs,fs, tmp_u8, "RGBA");
+                jsfeat.imgproc.box_blur_gray(tmp_u8, tmp_u8, options.blur, 0);
 
                 // render result back to canvas
                 var data_u32 = new Uint32Array(mask_data.data.buffer);
-                var alpha = (0xff << 24);
-                var i = img_u8.cols*img_u8.rows, pix = 0;
+                var i = tmp_u8.cols*tmp_u8.rows, pix = 0;
                 while(--i >= 0) {
-                   pix = img_u8.data[i];
-                   data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                   pix = tmp_u8.data[i];
+                   data_u32[i] = (pix << 24) | (pix << 16) | (pix << 8) | pix;
                 }
 
                 mask_ctx.putImageData(mask_data,0,0);
 
+                var data_u32 = new Uint32Array(mask_data.data.buffer);
+                var alpha = (0xff << 24);
+                var i = tmp_u8.cols*tmp_u8.rows, pix = 0;
+                while(--i >= 0) {
+                  pix = tmp_u8.data[i];
+                  data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                }
+
+                cc_ctx.putImageData(mask_data,0,0);
+
                 // // Generates glowing mask...not quite what I want but cool
-                // for (var i = 0; i < img_len; i += 4){
-                //     img_rgba[i+4] = masque[i];
+                // for (var i = 0; i < mask_raw_len; i += 4){
+                //     mask_raw[i+4] = masque[i];
                 // }
             }
 
 
-            function median(values) {
-                values.sort( function(a,b) {return a - b;} );
-                var half = Math.floor(values.length/2);
-                if(values.length % 2)
-                    return values[half];
-                else
-                    return (values[half-1] + values[half]) / 2.0;
+            // A utility function to draw a rectangle with rounded corners.
+
+            function roundedRect(ctx,x,y,width,height,radius){
+                ctx.beginPath();
+                ctx.moveTo(x,y+radius);
+                ctx.lineTo(x,y+height-radius);
+                ctx.arcTo(x,y+height,x+radius,y+height,radius);
+                ctx.lineTo(x+width-radius,y+height);
+                ctx.arcTo(x+width,y+height,x+width,y+height-radius,radius);
+                ctx.lineTo(x+width,y+radius);
+                ctx.arcTo(x+width,y,x+width-radius,y,radius);
+                ctx.lineTo(x+radius,y);
+                ctx.arcTo(x,y,x,y+radius,radius);
+                ctx.stroke();
+                ctx.fill();
             }
 
             $(window).unload(function() {
