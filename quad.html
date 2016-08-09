@@ -1,0 +1,291 @@
+<!doctype html>
+
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <meta name="description" content="Face Isolation">
+        <meta name="author" content="Adam Schuster">
+        <title>Face Masque</title>
+
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Sans:regular,bold|Inconsolata|PT+Sans:400,700">
+        <link rel="stylesheet" href="css/bootstrap.css">
+        <link rel="stylesheet" href="css/jsfeat.css">
+        <script type="text/javascript" src="caman.full.min.js"></script>
+
+
+    </head>
+    <body>
+            <video id="webcam" width="640" height="480" style="display:none;"></video>
+            <div style=" width:640px;height:480px;margin: 10px auto;">
+                <canvas id="canvas" width="640" height="480"></canvas>
+                <div id="no_rtc" class="alert alert-error" style="display:none;"></div>
+            </div>
+            <div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                <canvas id="canvas2" width="256" height="256"></canvas>
+            </div>
+            <div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                <canvas id="canvas3" width="256" height="256"></canvas>
+            </div>
+            <div style=" width:256px; height:256px; margin 10px auto; float:left;">
+                <canvas id="canvas4" width="256" height="256"></canvas>
+            </div>
+
+        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.8.2/jquery.min.js"></script>
+        <script type="text/javascript" src="js/jsfeat-min.js"></script>
+        <script type="text/javascript" src="js/frontalface.js"></script>
+        <script type="text/javascript" src="js/compatibility.js"></script>
+        <script type="text/javascript" src="js/profiler.js"></script>
+        <script type="text/javascript" src="js/dat.gui.min.js"></script>
+        <script type="text/javascript">
+
+        $(window).load(function() {
+            "use strict";
+
+            // lets do some fun
+            var video = document.getElementById('webcam');
+            var canvas = document.getElementById('canvas');
+            try {
+                var attempts = 0;
+                var readyListener = function(event) {
+                    findVideoSize();
+                };
+                var findVideoSize = function() {
+                    if(video.videoWidth > 0 && video.videoHeight > 0) {
+                        video.removeEventListener('loadeddata', readyListener);
+                        onDimensionsReady(video.videoWidth, video.videoHeight);
+                    } else {
+                        if(attempts < 10) {
+                            attempts++;
+                            setTimeout(findVideoSize, 200);
+                        } else {
+                            onDimensionsReady(640, 480);
+                        }
+                    }
+                };
+                var onDimensionsReady = function(width, height) {
+                    demo_app(width, height);
+                    compatibility.requestAnimationFrame(tick);
+                };
+
+                video.addEventListener('loadeddata', readyListener);
+
+                compatibility.getUserMedia({video: true}, function(stream) {
+                    try {
+                        video.src = compatibility.URL.createObjectURL(stream);
+                    } catch (error) {
+                        video.src = stream;
+                    }
+                    setTimeout(function() {
+                            video.play();
+                        }, 500);
+                }, function (error) {
+                    $('#canvas').hide();
+                    $('#log').hide();
+                    $('#no_rtc').html('<h4>WebRTC not available.</h4>');
+                    $('#no_rtc').show();
+                });
+            } catch (error) {
+                $('#canvas').hide();
+                $('#log').hide();
+                $('#no_rtc').html('<h4>Something goes wrong...</h4>');
+                $('#no_rtc').show();
+            }
+
+            var stat = new profiler();
+
+            var gui,options,ctx,canvasWidth,canvasHeight;
+            var img_u8,work_canvas,work_ctx,face_canvas,face_ctx,mask_canvas,mask_ctx,fs,ii_sum,ii_sqsum,ii_tilted,edg,ii_canny,gray_img;
+            var classifier = jsfeat.haar.frontalface;
+
+            var max_work_size = 160;
+
+            var demo_opt = function(){
+                this.radius = 3;
+            }
+
+            function demo_app(videoWidth, videoHeight) {
+                canvasWidth  = canvas.width;
+                canvasHeight = canvas.height;
+                ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = "rgb(0,255,0)";
+                ctx.strokeStyle = "rgb(0,255,0)";
+
+                var scale = Math.min(max_work_size/videoWidth, max_work_size/videoHeight);
+                var w = (videoWidth*scale)|0;
+                var h = (videoHeight*scale)|0;
+
+                img_u8 = new jsfeat.matrix_t(w, h, jsfeat.U8_t | jsfeat.C1_t);
+                edg = new jsfeat.matrix_t(w, h, jsfeat.U8_t | jsfeat.C1_t);
+
+                work_canvas = document.getElementById('canvas2')
+                work_canvas.width = w;
+                work_canvas.height = h;
+                work_ctx = work_canvas.getContext('2d');
+
+                face_canvas = document.getElementById('canvas3')
+                fs = 256;
+                face_ctx = face_canvas.getContext('2d');
+
+                mask_canvas = document.getElementById('canvas4')
+                mask_ctx = mask_canvas.getContext('2d');
+
+                ii_sum = new Int32Array((w+1)*(h+1));
+                ii_sqsum = new Int32Array((w+1)*(h+1));
+                ii_tilted = new Int32Array((w+1)*(h+1));
+                ii_canny = new Int32Array((w+1)*(h+1));
+
+                options = new demo_opt();
+                gui = new dat.GUI();
+
+                gui.add(options, 'radius', 1, 31).step(1);
+
+                stat.add("haar detector");
+            }
+
+            function tick() {
+                compatibility.requestAnimationFrame(tick);
+                stat.new_frame();
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+
+                    work_ctx.drawImage(video, 0, 0, work_canvas.width, work_canvas.height);
+                    var imageData = work_ctx.getImageData(0, 0, work_canvas.width, work_canvas.height);
+
+                    stat.start("haar detector");
+
+                    // Prep image for Face Detection
+                    jsfeat.imgproc.grayscale(imageData.data, work_canvas.width, work_canvas.height, img_u8);
+
+                    jsfeat.imgproc.equalize_histogram(img_u8, img_u8);
+
+                    jsfeat.imgproc.compute_integral_image(img_u8, ii_sum, ii_sqsum, classifier.tilted ? ii_tilted : null);
+
+                    var rects = jsfeat.haar.detect_multi_scale(ii_sum, ii_sqsum, ii_tilted, null, img_u8.cols, img_u8.rows, classifier, 1.2, 1);
+                    rects = jsfeat.haar.group_rectangles(rects, 1);
+
+                    stat.stop("haar detector");
+
+                    // draw only most confident one
+                    crop_face(ctx, face_ctx, rects, canvasWidth/img_u8.cols, 1);
+
+                    $('#log').html(stat.log());
+                }
+            }
+
+            function crop_face(ctx, face_ctx, rects, sc, max) {
+                var on = rects.length;
+                if(on && max) {
+                    jsfeat.math.qsort(rects, 0, on-1, function(a,b){return (b.confidence<a.confidence);})
+                }
+                var n = max || on;
+                n = Math.min(n, on);
+                var r;
+                for(var i = 0; i < n; ++i) {
+                    r = rects[i];
+                    var x0 = r.x * sc;
+                    var y0 = r.y * sc;
+                    var w0 = r.width * sc;
+                    var h0 = r.height * sc;
+                    // scale width to keep constant height
+                    var w1 = parseInt(fs*w0/h0);
+
+                    // load cropped face info from working context
+                    var mask_data = work_ctx.getImageData(x0,y0,w0,h0);
+
+                    face_ctx.clearRect(0,0,fs,fs);
+
+                    // Rough clip face data with an Ellipse
+                    var xC = parseInt(fs/2);
+                    var yC = parseInt(fs/2);
+                    face_ctx.ellipse( xC, yC, parseInt(w0*0.8), parseInt(h0*0.9), 0, 0, 2*Math.PI);
+                    face_ctx.clip();
+                    face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,w1,fs);
+
+                    // load face data from Face Canvas
+                    mask_data = face_ctx.getImageData(0,0,fs,fs);
+                    mask_ctx.putImageData(mask_data, 0, 0);
+
+                    var face_data = face_ctx.getImageData(0,0,fs,fs);
+
+                    // mask to skin
+                    find_skin_rgb(mask_data);
+
+
+                    ctx.clearRect(0,0,canvasWidth,canvasHeight);
+                    ctx.globalCompositeOperation = "multiply";
+
+                    ctx.putImageData(mask_data, 0, 0);
+                    // ctx.putImageData(face_data, 0, 0);
+                }
+            }
+
+
+            // As shown by Peer et al 2003
+            // skin tone clusters in a region if the following are all true:
+            // R > 95
+            // G > 40
+            // B > 20
+            // max{R,G,B} - min{R,G,B} > 15
+            // |R-G| > 15
+            // R > G
+            // R > B
+            //
+            function find_skin_rgb(mask_data){
+                var img_rgba = mask_data.data;
+                var img_len  = img_rgba.length;
+
+                for (var i = 0; i < img_len; i += 4){
+                    // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
+                    var r = img_rgba[i];
+                    var g = img_rgba[i+1];
+                    var b = img_rgba[i+2];
+
+                    var skin = false;
+
+                    var maxRGB = Math.max(r,g,b);
+                    var minRGB = Math.min(r,g,b);
+
+                    if ((r > 95) && (g > 40) && (b > 20) && (maxRGB - minRGB > 15) && (Math.abs(r - g) > 15) && (r > g) && (r > b)) {
+                        skin = true;
+                    }
+
+                    if (skin == true) {
+                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = img_rgba[i+3] = 255;
+                    }
+                    else {
+                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = img_rgba[i+3] = 0;
+                    }
+
+                }
+
+                jsfeat.imgproc.box_blur_gray(img_rgba, img_u8, options.radius, null);
+
+                // jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
+                // jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, null);
+
+
+                // // Generates glowing mask...not quite what I want but cool
+                // for (var i = 0; i < img_len; i += 4){
+                //     img_rgba[i+4] = masque[i];
+                // }
+            }
+
+
+            function median(values) {
+                values.sort( function(a,b) {return a - b;} );
+                var half = Math.floor(values.length/2);
+                if(values.length % 2)
+                    return values[half];
+                else
+                    return (values[half-1] + values[half]) / 2.0;
+            }
+
+            $(window).unload(function() {
+                video.pause();
+                video.src=null;
+            });
+        });
+        </script>
+    </body>
+</html>
