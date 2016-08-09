@@ -101,16 +101,14 @@
             var max_work_size = 160;
 
             var demo_opt = function(){
-                this.radius = 3;
+                this.radius = 16;
             }
 
             function demo_app(videoWidth, videoHeight) {
                 canvasWidth  = canvas.width;
                 canvasHeight = canvas.height;
                 ctx = canvas.getContext('2d');
-
-                ctx.fillStyle = "rgb(0,255,0)";
-                ctx.strokeStyle = "rgb(0,255,0)";
+                ctx.globalCompositeOperation = 'multiply';
 
                 var scale = Math.min(max_work_size/videoWidth, max_work_size/videoHeight);
                 var w = (videoWidth*scale)|0;
@@ -193,12 +191,14 @@
                     // load cropped face info from working context
                     var mask_data = work_ctx.getImageData(x0,y0,w0,h0);
 
-                    face_ctx.clearRect(0,0,fs,fs);
+                    // face_ctx.clearRect(0,0,fs,fs);
 
                     // Rough clip face data with an Ellipse
                     var xC = parseInt(fs/2);
                     var yC = parseInt(fs/2);
                     face_ctx.ellipse( xC, yC, parseInt(w0*0.8), parseInt(h0*0.9), 0, 0, 2*Math.PI);
+                    face_ctx.shadowColor = "black";
+                    face_ctx.shadowBlur = 10;
                     face_ctx.clip();
                     face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,w1,fs);
 
@@ -211,12 +211,9 @@
                     // mask to skin
                     find_skin_rgb(mask_data);
 
-
-                    ctx.clearRect(0,0,canvasWidth,canvasHeight);
-                    ctx.globalCompositeOperation = "multiply";
-
-                    ctx.putImageData(mask_data, 0, 0);
-                    // ctx.putImageData(face_data, 0, 0);
+                    ctx.clearRect(0,0,fs,fs);
+                    ctx.drawImage(mask_canvas, 0, 0);
+                    ctx.drawImage(face_canvas, 0, 0);
                 }
             }
 
@@ -259,11 +256,19 @@
 
                 }
 
-                jsfeat.imgproc.box_blur_gray(img_rgba, img_u8, options.radius, null);
+                jsfeat.imgproc.grayscale(img_rgba, fs,fs, img_u8, "RGBA");
+                jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, 0);
 
-                // jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
-                // jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, null);
+                // render result back to canvas
+                var data_u32 = new Uint32Array(mask_data.data.buffer);
+                var alpha = (0xff << 24);
+                var i = img_u8.cols*img_u8.rows, pix = 0;
+                while(--i >= 0) {
+                   pix = img_u8.data[i];
+                   data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                }
 
+                mask_ctx.putImageData(mask_data,0,0);
 
                 // // Generates glowing mask...not quite what I want but cool
                 // for (var i = 0; i < img_len; i += 4){
