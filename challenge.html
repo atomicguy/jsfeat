@@ -87,7 +87,7 @@
             var stat = new profiler();
 
             var gui,options,ctx,canvasWidth,canvasHeight;
-            var img_u8,work_canvas,work_ctx,face_canvas,face_ctx,fs,ii_sum,ii_sqsum,ii_tilted,edg,ii_canny,gray_img;
+            var img_u8,work_canvas,work_ctx,face_canvas,face_ctx,mask_canvas,mask_ctx,fs,ii_sum,ii_sqsum,ii_tilted,edg,ii_canny,gray_img;
             var classifier = jsfeat.haar.frontalface;
 
             var max_work_size = 160;
@@ -120,7 +120,11 @@
                 face_canvas.width = fs;
                 face_canvas.height = fs;
                 face_ctx = face_canvas.getContext('2d');
-                gray_img = new jsfeat.matrix_t(fs, fs, jsfeat.U8_t | jsfeat.C1_t);
+
+                mask_canvas = document.createElement('canvas');
+                mask_canvas.width = fs;
+                mask_canvas.height= fs;
+                mask_ctx = mask_canvas.getContext('2d');
 
                 ii_sum = new Int32Array((w+1)*(h+1));
                 ii_sqsum = new Int32Array((w+1)*(h+1));
@@ -182,7 +186,7 @@
                     var w1 = parseInt(fs*w0/h0);
 
                     // load cropped face info from working context
-                    var face_data = work_ctx.getImageData(x0,y0,w0,h0);
+                    var mask_data = work_ctx.getImageData(x0,y0,w0,h0);
 
                     face_ctx.clearRect(0,0,fs,fs);
 
@@ -194,12 +198,20 @@
                     face_ctx.drawImage(video, x0,y0,w0,h0, 0,0,w1,fs);
 
                     // load face data from Face Canvas
-                    face_data = face_ctx.getImageData(0,0,w1,fs);
+                    mask_data = face_ctx.getImageData(0,0,fs,fs);
+                    mask_ctx.putImageData(mask_data, 0, 0);
+
+                    var face_data = face_ctx.getImageData(0,0,fs,fs);
 
                     // mask to skin
-                    find_skin_rgb(face_data);
+                    find_skin_rgb(mask_data);
 
-                    ctx.putImageData(face_data, 0, 0);
+
+                    ctx.clearRect(0,0,canvasWidth,canvasHeight);
+                    ctx.globalCompositeOperation = "multiply";
+
+                    ctx.putImageData(mask_data, 0, 0);
+                    // ctx.putImageData(face_data, 0, 0);
                 }
             }
 
@@ -214,18 +226,15 @@
             // R > G
             // R > B
             //
-            function find_skin_rgb(face_data){
-                var img_rgba = face_data.data;
+            function find_skin_rgb(mask_data){
+                var img_rgba = mask_data.data;
                 var img_len  = img_rgba.length;
-
-                // clone data into an array for the mask
-                var masque = img_rgba.slice(0);
 
                 for (var i = 0; i < img_len; i += 4){
                     // var rgba = [img_rgba[i], img_rgba[i+1], img_rgba[i+2]];
-                    var r = masque[i];
-                    var g = masque[i+1];
-                    var b = masque[i+2];
+                    var r = img_rgba[i];
+                    var g = img_rgba[i+1];
+                    var b = img_rgba[i+2];
 
                     var skin = false;
 
@@ -237,47 +246,26 @@
                     }
 
                     if (skin == true) {
-                        masque[i] = masque[i+1] = masque[i+2] = masque[i+3] = 255;
+                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = img_rgba[i+3] = 255;
                     }
                     else {
-                        masque[i] = masque[i+1] = masque[i+2] = masque[i+3] = 0;
+                        img_rgba[i] = img_rgba[i+1] = img_rgba[i+2] = img_rgba[i+3] = 0;
                     }
 
                 }
 
-                jsfeat.imgproc.grayscale(masque, fs, fs, img_u8);
-                jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, null);
+                jsfeat.imgproc.box_blur_gray(img_rgba, img_u8, options.radius, null);
 
-                // var data_u32 = new Uint32Array(face_data.data.buffer);
-                // var alpha = (0xff << 24);
-                // var i = gray_img.cols*gray_img.rows, pix = 0;
-                // while(--i >= 0) {
-                //     pix = img_rgba[i];
-                //     data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
+                // jsfeat.imgproc.grayscale(img_rgba, fs, fs, img_u8);
+                // jsfeat.imgproc.box_blur_gray(img_u8, img_u8, options.radius, null);
+
+
+                // // Generates glowing mask...not quite what I want but cool
+                // for (var i = 0; i < img_len; i += 4){
+                //     img_rgba[i+4] = masque[i];
                 // }
-
-                // jsfeat.imgproc.gaussian_blur(img_u8, img_u8, options.kernel, options.sigma);
-                // jsfeat.imgproc.canny(img_u8, img_u8, options.low_threshold|0, options.high_threshold|0);
-
-                // Generates glowing mask...not quite what I want but cool
-                for (var i = 0; i < img_len; i += 4){
-                    img_rgba[i+4] = masque[i];
-                }
-
-                // // Load adjusted data back onto a Canvas
-                // var data_u32 = new Uint32Array(masque.buffer);
-                //     var alpha = (0xff << 24);
-                //     var i = img_u8.cols*img_u8.rows, pix = 0;
-                //     while(--i >= 0) {
-                //         pix = img_u8[i];
-                //         data_u32[i] = alpha | (pix << 16) | (pix << 8) | pix;
-                //     }
-
-                // // Use CamanJS filter
-                // Caman("#canvas", function() {
-                //     this.colorize(242, 128, 51, 50).render();
-                // });
             }
+
 
             function median(values) {
                 values.sort( function(a,b) {return a - b;} );
